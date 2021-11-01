@@ -67,6 +67,7 @@ class Evaluator:
         }
         with open(path, 'wb') as f:
             pickle.dump(save_dict, f)
+            print(save_dict)
         return path
 
     # Import benchmark_results if this evaluator uses the same detectors and datasets
