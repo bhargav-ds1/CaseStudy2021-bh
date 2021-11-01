@@ -115,7 +115,6 @@ class LSTMED(Algorithm, PyTorchUtils):
 
         return scores
 
-
 class LSTMEDModule(nn.Module, PyTorchUtils):
     def __init__(self, n_features: int, hidden_size: int,
                  n_layers: tuple, use_bias: tuple, dropout: tuple,

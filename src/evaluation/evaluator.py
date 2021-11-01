@@ -389,12 +389,14 @@ class Evaluator:
     def store(self, fig, title, extension='pdf', no_counters=False, store_in_figures=False):
         timestamp = time.strftime('%Y-%m-%d-%H%M%S')
         if store_in_figures:
-            output_dir = os.path.join(self.output_dir, 'figures')
+            output_dir = os.path.join(self.output_dir, 'figures',title)
         else:
-            output_dir = os.path.join(self.output_dir, 'figures', f'seed-{self.seed}')
+            output_dir = os.path.join(self.output_dir, 'figures', f'seed-{self.seed}',title)
         os.makedirs(output_dir, exist_ok=True)
+        print(output_dir)
         counters_str = '' if no_counters else f'-{len(self.detectors)}-{len(self.datasets)}'
-        path = os.path.join(output_dir, f'{title}{counters_str}-{timestamp}.{extension}')
+        path = os.path.join(output_dir, f'{counters_str}--{timestamp}.{extension}')
+        print(path)
         fig.savefig(path)
         self.logger.info(f'Stored plot at {path}')
 
