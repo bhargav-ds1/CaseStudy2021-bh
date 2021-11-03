@@ -4,7 +4,7 @@ import os
 import numpy as np
 import pandas as pd
 
-from src.algorithms import LSTMED
+from src.algorithms import LSTMED, GRUED
 from src.datasets import RealPickledDataset
 from src.evaluation import Evaluator
 
@@ -17,7 +17,8 @@ def main():
 
 def detectors(seed):
     standard_epochs = 40
-    dets = [LSTMED(num_epochs=standard_epochs, seed=seed)]
+    dets = [LSTMED(num_epochs=standard_epochs, seed=seed),
+            GRUED(num_epochs=standard_epochs, seed=seed)]
 
     return sorted(dets, key=lambda x: x.framework)
 

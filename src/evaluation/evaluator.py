@@ -56,6 +56,7 @@ class Evaluator:
         os.makedirs(output_dir, exist_ok=True)
         timestamp = time.strftime('%Y-%m-%d-%H%M%S')
         path = os.path.join(output_dir, f'{name}-{timestamp}.pkl')
+        path1 = os.path.join(output_dir, f'{name}-{timestamp}-benchmark_results.csv')
         self.logger.info(f'Store evaluator results at {os.path.abspath(path)}')
         save_dict = {
             'datasets': [x.name for x in self.datasets],
@@ -67,7 +68,7 @@ class Evaluator:
         }
         with open(path, 'wb') as f:
             pickle.dump(save_dict, f)
-            print(save_dict)
+            print(save_dict['benchmark_results'])
         return path
 
     # Import benchmark_results if this evaluator uses the same detectors and datasets
@@ -394,10 +395,8 @@ class Evaluator:
         else:
             output_dir = os.path.join(self.output_dir, 'figures', f'seed-{self.seed}',title)
         os.makedirs(output_dir, exist_ok=True)
-        print(output_dir)
         counters_str = '' if no_counters else f'-{len(self.detectors)}-{len(self.datasets)}'
         path = os.path.join(output_dir, f'{counters_str}--{timestamp}.{extension}')
-        print(path)
         fig.savefig(path)
         self.logger.info(f'Stored plot at {path}')
 
