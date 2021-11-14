@@ -6,7 +6,6 @@ import re
 import sys
 import traceback
 from textwrap import wrap
-
 import matplotlib.pyplot as plt
 import matplotlib.patheffects as path_effects
 from matplotlib.font_manager import FontProperties
@@ -16,14 +15,14 @@ import progressbar
 import time
 from sklearn.metrics import accuracy_score, fbeta_score
 from sklearn.metrics import precision_recall_fscore_support as prf
-from sklearn.metrics import roc_curve, auc
+from sklearn.metrics import roc_curve, auc ,confusion_matrix
 from tabulate import tabulate
 
 from .config import init_logging
 
 
 class Evaluator:
-    def __init__(self, datasets: list, detectors: callable, output_dir: {str} = None, seed: int = None,
+    def __init__(self, datasets: list, detectors: callable,step, sequence_length, output_dir: {str} = None, seed: int = None,
                  create_log_file=True):
         """
         :param datasets: list of datasets
@@ -32,6 +31,8 @@ class Evaluator:
         assert np.unique([x.name for x in datasets]).size == len(datasets), 'Some datasets have the same name!'
         self.datasets = datasets
         self._detectors = detectors
+        self.step = step
+        self.sequence_length = sequence_length
         self.output_dir = output_dir or 'reports'
         self.results = dict()
         if create_log_file:
@@ -44,7 +45,7 @@ class Evaluator:
 
     @property
     def detectors(self):
-        detectors = self._detectors(self.seed)
+        detectors = self._detectors(self.seed,self.step,self.sequence_length)
         assert np.unique([x.name for x in detectors]).size == len(detectors), 'Some detectors have the same name!'
         return detectors
 
@@ -100,7 +101,7 @@ class Evaluator:
         if precision == 0 and recall == 0:
             f01_score = 0
         else:
-            f01_score = fbeta_score(y_true, y_pred, average='binary', beta=0.1)
+            f01_score = fbeta_score(y_true, y_pred, average='binary', beta=0.05)
         return accuracy, precision, recall, f_score, f01_score
 
     @staticmethod
@@ -137,6 +138,7 @@ class Evaluator:
                     self.results[(ds.name, det.name)] = score
                     try:
                         self.plot_details(det, ds, score)
+                        self.plot_epoch_loss(det,ds)
                     except Exception:
                         pass
                 except Exception as e:
@@ -153,6 +155,8 @@ class Evaluator:
                 score = self.results[(ds.name, det.name)]
                 y_pred = self.binarize(score, self.get_optimal_threshold(det, y_test, np.array(score)))
                 acc, prec, rec, f1_score, f01_score = self.get_accuracy_precision_recall_fscore(y_test, y_pred)
+                confusion_mat = confusion_matrix(y_test,y_pred,labels=[0,1])
+                self.plot_confusion_matrix(det,ds,confusion_mat)
                 score = self.results[(ds.name, det.name)]
                 auroc = self.get_auroc(det, ds, score)
                 df = df.append({'dataset': ds.name,
@@ -162,9 +166,37 @@ class Evaluator:
                                 'recall': rec,
                                 'F1-score': f1_score,
                                 'F0.1-score': f01_score,
-                                'auroc': auroc},
+                                'auroc': auroc,
+                                'confusion_mat':confusion_mat},
                                ignore_index=True)
         return df
+
+    def plot_confusion_matrix(self,det,ds,conf_matrix,store=True):
+        plt.close('all')
+        fig, ax = plt.subplots(figsize=(7.5, 7.5))
+        ax.matshow(conf_matrix, cmap=plt.cm.Blues, alpha=0.3)
+        for i in range(conf_matrix.shape[0]):
+            for j in range(conf_matrix.shape[1]):
+                ax.text(x=j, y=i,s=conf_matrix[i, j], va='center', ha='center', size='xx-large')
+
+        plt.xlabel('Predictions', fontsize=18)
+        plt.ylabel('Actuals', fontsize=18)
+        plt.title('Confusion Matrix', fontsize=18)
+        if store:
+            self.store(fig, f'confusion_matrix-{det.name}-{ds.name}')
+        return fig
+
+    def plot_epoch_loss(self,det,ds,store=True):
+        plt.close('all')
+        fig = plt.figure()
+        arr = []
+        for i in det.epoch_loss:
+            arr.append(i.item())
+
+        plt.plot(arr)
+        if store:
+            self.store(fig, f'epoch_loss_plot-{det.name}-{ds.name}')
+        return fig
 
     def get_metrics_by_thresholds(self, y_test: list, score: list, thresholds: list):
         for threshold in thresholds:

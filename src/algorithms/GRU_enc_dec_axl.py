@@ -8,21 +8,21 @@ from scipy.stats import multivariate_normal
 from torch.utils.data import DataLoader
 from torch.utils.data.sampler import SubsetRandomSampler
 from tqdm import trange
-
+import hiddenlayer as hl
 from .algorithm_utils import Algorithm, PyTorchUtils
 
 
 class GRUED(Algorithm, PyTorchUtils):
-    def __init__(self, name: str = 'GRU-ED', num_epochs: int = 20, batch_size: int = 10, lr: float = 1e-3,
+    def __init__(self, name: str = 'GRU-ED', num_epochs: int = 20, batch_size: int = 2, lr: float = 1e-3,
                  hidden_size: int = 5, sequence_length: int = 30, train_gaussian_percentage: float = 0.25,
                  n_layers: tuple = (1, 1), use_bias: tuple = (True, True), dropout: tuple = (0, 0),
-                 seed: int = None, gpu: int = None, details=True):
+                 seed: int = None, gpu: int = None, details=True, step: int=1):
         Algorithm.__init__(self, __name__, name, seed, details=details)
         PyTorchUtils.__init__(self, seed, gpu)
         self.num_epochs = num_epochs
         self.batch_size = batch_size
         self.lr = lr
-
+        self.step = step
         self.hidden_size = hidden_size
         self.sequence_length = sequence_length
         self.train_gaussian_percentage = train_gaussian_percentage
@@ -38,7 +38,7 @@ class GRUED(Algorithm, PyTorchUtils):
         X.interpolate(inplace=True)
         X.bfill(inplace=True)
         data = X.values
-        sequences = [data[i:i + self.sequence_length] for i in range(data.shape[0] - self.sequence_length + 1)]
+        sequences = [data[i:i + self.sequence_length] for i in range(0,data.shape[0] - self.sequence_length +1,self.step)]
         indices = np.random.permutation(len(sequences))
         split_point = int(self.train_gaussian_percentage * len(sequences))
         train_loader = DataLoader(dataset=sequences, batch_size=self.batch_size, drop_last=True,
@@ -53,6 +53,7 @@ class GRUED(Algorithm, PyTorchUtils):
         optimizer = torch.optim.Adam(self.GRUed.parameters(), lr=self.lr)
 
         self.GRUed.train()
+
         for epoch in trange(self.num_epochs):
             logging.debug(f'Epoch {epoch+1}/{self.num_epochs}.')
             for ts_batch in train_loader:
@@ -76,7 +77,7 @@ class GRUED(Algorithm, PyTorchUtils):
         X.interpolate(inplace=True)
         X.bfill(inplace=True)
         data = X.values
-        sequences = [data[i:i + self.sequence_length] for i in range(data.shape[0] - self.sequence_length + 1)]
+        sequences = [data[i:i + self.sequence_length] for i in range(0,data.shape[0] - self.sequence_length +1,self.step)]
         data_loader = DataLoader(dataset=sequences, batch_size=self.batch_size, shuffle=False, drop_last=False)
 
         self.GRUed.eval()

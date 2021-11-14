@@ -15,10 +15,9 @@ def main():
     evaluate_real_datasets()
 
 
-def detectors(seed):
+def detectors(seed,step,sequence_length):
     standard_epochs = 40
-    dets = [LSTMED(num_epochs=standard_epochs, seed=seed),
-            GRUED(num_epochs=standard_epochs, seed=seed)]
+    dets = [LSTMED(num_epochs=standard_epochs, seed=seed,step=step,sequence_length=sequence_length)]
 
     return sorted(dets, key=lambda x: x.framework)
 
@@ -67,7 +66,7 @@ def detectors(seed):
 def evaluate_real_datasets():
     REAL_DATASET_GROUP_PATH = 'data/raw/'
     real_dataset_groups = glob.glob(REAL_DATASET_GROUP_PATH + '*')
-    seeds = np.random.randint(np.iinfo(np.uint32).max, size=RUNS, dtype=np.uint32)
+    seeds = [3424441226]
     results = pd.DataFrame()
     datasets = []
     for real_dataset_group in real_dataset_groups:
@@ -77,7 +76,7 @@ def evaluate_real_datasets():
             datasets.append(dataset)
 
     for seed in seeds:
-        evaluator = Evaluator(datasets, detectors, seed=seed)
+        evaluator = Evaluator(datasets, detectors, seed=seed, step=1, sequence_length=30)
         evaluator.evaluate()
         result = evaluator.benchmarks()
         evaluator.plot_roc_curves()

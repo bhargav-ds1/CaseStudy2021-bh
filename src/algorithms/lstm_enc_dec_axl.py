@@ -13,16 +13,16 @@ from .algorithm_utils import Algorithm, PyTorchUtils
 
 
 class LSTMED(Algorithm, PyTorchUtils):
-    def __init__(self, name: str = 'LSTM-ED', num_epochs: int = 20, batch_size: int = 10, lr: float = 1e-3,
-                 hidden_size: int = 5, sequence_length: int = 30, train_gaussian_percentage: float = 0.25,
+    def __init__(self, name: str = 'LSTM-ED', num_epochs: int = 20, batch_size: int = 50, lr: float = 1e-3,
+                 hidden_size: int = 5, sequence_length: int = 30, train_gaussian_percentage: float = 0.20,
                  n_layers: tuple = (1, 1), use_bias: tuple = (True, True), dropout: tuple = (0, 0),
-                 seed: int = None, gpu: int = None, details=True):
+                 seed: int = None, gpu: int = None, details=True, step: int=1):
         Algorithm.__init__(self, __name__, name, seed, details=details)
         PyTorchUtils.__init__(self, seed, gpu)
         self.num_epochs = num_epochs
         self.batch_size = batch_size
         self.lr = lr
-
+        self.step = step
         self.hidden_size = hidden_size
         self.sequence_length = sequence_length
         self.train_gaussian_percentage = train_gaussian_percentage
@@ -38,7 +38,7 @@ class LSTMED(Algorithm, PyTorchUtils):
         X.interpolate(inplace=True)
         X.bfill(inplace=True)
         data = X.values
-        sequences = [data[i:i + self.sequence_length] for i in range(data.shape[0] - self.sequence_length + 1)]
+        sequences = [data[i:i + self.sequence_length] for i in range(0, data.shape[0] - self.sequence_length +1,self.step)]
         indices = np.random.permutation(len(sequences))
         split_point = int(self.train_gaussian_percentage * len(sequences))
         train_loader = DataLoader(dataset=sequences, batch_size=self.batch_size, drop_last=True,
@@ -51,17 +51,19 @@ class LSTMED(Algorithm, PyTorchUtils):
                                    seed=self.seed, gpu=self.gpu)
         self.to_device(self.lstmed)
         optimizer = torch.optim.Adam(self.lstmed.parameters(), lr=self.lr)
-
         self.lstmed.train()
+        epoch_loss = []
         for epoch in trange(self.num_epochs):
             logging.debug(f'Epoch {epoch+1}/{self.num_epochs}.')
+            loss_arr = []
             for ts_batch in train_loader:
                 output = self.lstmed(self.to_var(ts_batch))
                 loss = nn.MSELoss(size_average=False)(output, self.to_var(ts_batch.float()))
+                loss_arr.append(loss)
                 self.lstmed.zero_grad()
                 loss.backward()
                 optimizer.step()
-
+            epoch_loss.append(sum(loss_arr))
         self.lstmed.eval()
         error_vectors = []
         for ts_batch in train_gaussian_loader:
@@ -71,12 +73,13 @@ class LSTMED(Algorithm, PyTorchUtils):
 
         self.mean = np.mean(error_vectors, axis=0)
         self.cov = np.cov(error_vectors, rowvar=False)
+        self.epoch_loss = epoch_loss
 
     def predict(self, X: pd.DataFrame):
         X.interpolate(inplace=True)
         X.bfill(inplace=True)
         data = X.values
-        sequences = [data[i:i + self.sequence_length] for i in range(data.shape[0] - self.sequence_length + 1)]
+        sequences = [data[i:i + self.sequence_length] for i in range(0,data.shape[0] - self.sequence_length +1,self.step)]
         data_loader = DataLoader(dataset=sequences, batch_size=self.batch_size, shuffle=False, drop_last=False)
 
         self.lstmed.eval()
@@ -86,6 +89,7 @@ class LSTMED(Algorithm, PyTorchUtils):
         errors = []
         for idx, ts in enumerate(data_loader):
             output = self.lstmed(self.to_var(ts))
+
             error = nn.L1Loss(reduce=False)(output, self.to_var(ts.float()))
             score = -mvnormal.logpdf(error.view(-1, X.shape[1]).data.cpu().numpy())
             scores.append(score.reshape(ts.size(0), self.sequence_length))
