@@ -13,7 +13,7 @@ from .algorithm_utils import Algorithm, PyTorchUtils
 
 
 class LSTMED(Algorithm, PyTorchUtils):
-    def __init__(self, name: str = 'LSTM-ED', num_epochs: int = 20, batch_size: int = 50, lr: float = 1e-3,
+    def __init__(self, name: str = 'LSTM-ED', num_epochs: int = 20, batch_size: int = 30, lr: float = 1e-3,
                  hidden_size: int = 5, sequence_length: int = 30, train_gaussian_percentage: float = 0.20,
                  n_layers: tuple = (1, 1), use_bias: tuple = (True, True), dropout: tuple = (0, 0),
                  seed: int = None, gpu: int = None, details=True, step: int=1):
@@ -32,7 +32,44 @@ class LSTMED(Algorithm, PyTorchUtils):
         self.dropout = dropout
 
         self.lstmed = None
-        self.mean, self.cov = None, None
+        self.mean, self.cov,self.epoch_loss = None, None, None
+
+    def loss_e(self,prototype,enc_hidden):
+        k_list = []
+        for k in range(prototype.shape[0]):
+            b_list = []
+            for batch in range(enc_hidden.shape[0]):
+                l = torch.sum(torch.mul(prototype[k]-enc_hidden[batch],prototype[k]-enc_hidden[batch]))
+                b_list.append(l)
+            b_list = torch.stack(b_list)
+            min_b = torch.min(b_list)
+            k_list.append(min_b)
+        k_list = torch.stack(k_list)
+        return torch.sum(k_list)
+
+    def loss_d(self,prototype,d_min = 2.0):
+        sum = torch.tensor(0)
+        for i in range(prototype.shape[0]):
+            for j in range(i+1,prototype.shape[0]):
+                sum = sum + torch.square(torch.max(torch.tensor(0),d_min - torch.sqrt_(torch.sum(torch.mul(
+                    prototype[i] - prototype[j],prototype[i] - prototype[j]),0))))
+        return sum
+
+
+
+    def loss_c(self,prototype,enc_hidden):
+        b_list = []
+        for batch in range(enc_hidden.shape[0]):
+            k_list = []
+            for k in range(prototype.shape[0]):
+                l = torch.sum(torch.mul(prototype[k]-enc_hidden[batch],prototype[k]-enc_hidden[batch]))
+                k_list.append(l)
+            k_list = torch.stack(k_list)
+            min_e = torch.min(k_list)
+            b_list.append(min_e)
+        b_list = torch.stack(b_list)
+        return torch.sum(b_list)
+
 
     def fit(self, X: pd.DataFrame):
         X.interpolate(inplace=True)
@@ -57,13 +94,19 @@ class LSTMED(Algorithm, PyTorchUtils):
             logging.debug(f'Epoch {epoch+1}/{self.num_epochs}.')
             loss_arr = []
             for ts_batch in train_loader:
-                output = self.lstmed(self.to_var(ts_batch))
-                loss = nn.MSELoss(size_average=False)(output, self.to_var(ts_batch.float()))
+                output, enc_hidden = self.lstmed(self.to_var(ts_batch), return_latent =True)
+                loss_c = self.loss_c(self.lstmed.prototype_layer.prototype,enc_hidden)
+                loss_d = self.loss_d(self.lstmed.prototype_layer.prototype,d_min= 2.0)
+                loss_e =  self.loss_e(self.lstmed.prototype_layer.prototype,enc_hidden)
+                loss_w = torch.sum(torch.abs(self.lstmed.hidden2output.weight))
+                loss = nn.MSELoss(size_average=False)(output, self.to_var(ts_batch.float()))+\
+                       0.1*loss_w + 1.0*loss_e + 0.01*loss_d + 1.0*loss_c
                 loss_arr.append(loss)
                 self.lstmed.zero_grad()
                 loss.backward()
                 optimizer.step()
             epoch_loss.append(sum(loss_arr))
+
         self.lstmed.eval()
         error_vectors = []
         for ts_batch in train_gaussian_loader:
@@ -119,6 +162,28 @@ class LSTMED(Algorithm, PyTorchUtils):
 
         return scores
 
+class prototype_layer(nn.Module, PyTorchUtils):
+    def __init__(self,hidden_size: int, seed:int, gpu:int,k=2):
+        super().__init__()
+        PyTorchUtils.__init__(self,seed,gpu)
+        self.hidden_size = hidden_size
+        self.k = k
+        self.prototype_size = torch.Tensor(k,hidden_size)
+        self.init_values = nn.init.uniform(self.prototype_size,a=0.0,b=1.0)
+        self.prototype = nn.Parameter(self.init_values)
+        self.similarity2output = nn.Linear(self.k,2)
+    def forward(self,x,batch_size):
+        a = torch.zeros((batch_size,self.k))
+        d = x[0].unsqueeze(1) - self.prototype.unsqueeze(1)
+        for i in range(self.k):
+            a[:,i] = torch.exp(-torch.sum(torch.mul(d[0,i],d[0,i]),1))
+        return a
+
+
+
+
+
+
 class LSTMEDModule(nn.Module, PyTorchUtils):
     def __init__(self, n_features: int, hidden_size: int,
                  n_layers: tuple, use_bias: tuple, dropout: tuple,
@@ -138,12 +203,17 @@ class LSTMEDModule(nn.Module, PyTorchUtils):
         self.decoder = nn.LSTM(self.n_features, self.hidden_size, batch_first=True,
                                num_layers=self.n_layers[1], bias=self.use_bias[1], dropout=self.dropout[1])
         self.to_device(self.decoder)
+        #-----------
+        self.prototype_layer = prototype_layer(self.hidden_size, seed, gpu, k=2)
+        self.to_device(self.prototype_layer)
+        #-----------
         self.hidden2output = nn.Linear(self.hidden_size, self.n_features)
         self.to_device(self.hidden2output)
 
     def _init_hidden(self, batch_size):
         return (self.to_var(torch.Tensor(self.n_layers[0], batch_size, self.hidden_size).zero_()),
                 self.to_var(torch.Tensor(self.n_layers[0], batch_size, self.hidden_size).zero_()))
+
 
     def forward(self, ts_batch, return_latent: bool = False):
         batch_size = ts_batch.shape[0]
@@ -154,6 +224,7 @@ class LSTMEDModule(nn.Module, PyTorchUtils):
 
         # 2. Use hidden state as initialization for our Decoder-LSTM
         dec_hidden = enc_hidden
+
 
         # 3. Also, use this hidden state to get the first output aka the last point of the reconstructed timeseries
         # 4. Reconstruct timeseries backwards
@@ -167,5 +238,7 @@ class LSTMEDModule(nn.Module, PyTorchUtils):
                 _, dec_hidden = self.decoder(ts_batch[:, i].unsqueeze(1).float(), dec_hidden)
             else:
                 _, dec_hidden = self.decoder(output[:, i].unsqueeze(1), dec_hidden)
+
+        self.prototype_layer(enc_hidden,batch_size)
 
         return (output, enc_hidden[1][-1]) if return_latent else output

@@ -8,13 +8,12 @@ from scipy.stats import multivariate_normal
 from torch.utils.data import DataLoader
 from torch.utils.data.sampler import SubsetRandomSampler
 from tqdm import trange
-import hiddenlayer as hl
 from .algorithm_utils import Algorithm, PyTorchUtils
 
 
 class GRUED(Algorithm, PyTorchUtils):
-    def __init__(self, name: str = 'GRU-ED', num_epochs: int = 20, batch_size: int = 2, lr: float = 1e-3,
-                 hidden_size: int = 5, sequence_length: int = 30, train_gaussian_percentage: float = 0.25,
+    def __init__(self, name: str = 'GRU-ED', num_epochs: int = 20, batch_size: int = 50, lr: float = 1e-3,
+                 hidden_size: int = 5, sequence_length: int = 208, train_gaussian_percentage: float = 0.25,
                  n_layers: tuple = (1, 1), use_bias: tuple = (True, True), dropout: tuple = (0, 0),
                  seed: int = None, gpu: int = None, details=True, step: int=1):
         Algorithm.__init__(self, __name__, name, seed, details=details)

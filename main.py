@@ -16,8 +16,10 @@ def main():
 
 
 def detectors(seed,step,sequence_length):
-    standard_epochs = 40
-    dets = [LSTMED(num_epochs=standard_epochs, seed=seed,step=step,sequence_length=sequence_length)]
+    standard_epochs = 20
+    dets = [
+            LSTMED(num_epochs=standard_epochs, seed=seed,step=step,sequence_length=sequence_length)
+            ]
 
     return sorted(dets, key=lambda x: x.framework)
 
