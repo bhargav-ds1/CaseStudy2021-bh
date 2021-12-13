@@ -16,8 +16,8 @@ import time
 from sklearn.metrics import accuracy_score, fbeta_score
 from sklearn.metrics import precision_recall_fscore_support as prf
 from sklearn.metrics import roc_curve, auc ,confusion_matrix
+from sklearn.manifold._t_sne import TSNE
 from tabulate import tabulate
-
 from .config import init_logging
 
 
@@ -35,6 +35,7 @@ class Evaluator:
         self.sequence_length = sequence_length
         self.output_dir = output_dir or 'reports'
         self.results = dict()
+        self.proto_input_space_ind = dict()
         if create_log_file:
             init_logging(os.path.join(self.output_dir, 'logs'))
         self.logger = logging.getLogger(__name__)
@@ -136,7 +137,11 @@ class Evaluator:
                     det.fit(X_train.copy())
                     score = det.predict(X_test.copy())
                     self.results[(ds.name, det.name)] = score
+                    self.proto_input_space_ind[(ds.name,det.name)] = det.proto_input_space_ind
+                    self.plot_prototypes_in_input_space(det,ds)
                     try:
+                        self.plot_latents_and_prototypes(det,ds,det.hidden_and_prototype_as_df)
+
                         self.plot_details(det, ds, score)
                         self.plot_epoch_loss(det,ds)
                     except Exception:
@@ -167,10 +172,42 @@ class Evaluator:
                                 'F1-score': f1_score,
                                 'F0.1-score': f01_score,
                                 'auroc': auroc,
-                                'confusion_mat':confusion_mat},
+                                'confusion_mat':confusion_mat
+                                },
                                ignore_index=True)
         return df
 
+    # plot_prototypes_in_input_space plots/ highlights the input sequences which are closer to the prototypes with respect
+    # the distance measure 'a= exp(-d)' in the hidden space.
+    def plot_prototypes_in_input_space(self,det,ds,store = True):
+        plt.close('all')
+        fig = plt.figure()
+        X_train, y_train, X_test, y_test = ds.data()
+        n_proto = self.proto_input_space_ind[(ds.name,det.name)].shape[0]
+        for k in range(n_proto):
+            st_ind = int(self.proto_input_space_ind[(ds.name,det.name)][k,0].item()) * self.step
+            seq_len = self.sequence_length
+            end_ind = st_ind + seq_len
+            for col in X_train.columns:
+                plt.subplot(n_proto,1,k+1)
+                plt.plot(X_train[col].iloc[(st_ind-(seq_len*2)):(end_ind+(seq_len*2))])
+                plt.plot(X_train[col].iloc[st_ind:end_ind])
+                plt.ylabel(f'Proto-{k}')
+        if store:
+            self.store(fig, f'inputs_closest_to_prototypes-{det.name}-{ds.name}')
+        return fig
+    # plot_latents_and_prototypes function gathers the hidden space for the inputs along with the prototypes and maps them
+    # to 2 dimensions by using tnse approach of dimensionality reduction and plots them as a points in the latent space.
+    def plot_latents_and_prototypes(self,det,ds,df,store = True):
+        plt.close('all')
+        df1 = df.hidden_and_prototype_sequences.apply(pd.Series).assign(**{'indicator':df.indicator})
+        tnse = TSNE(n_components = 2 , verbose = 0, perplexity = 5 , n_iter = 300)
+        tnse_results = tnse.fit_transform(df1.iloc[:,:-1])
+        fig = plt.figure()
+        plt.scatter(tnse_results[:,0],tnse_results[:,1],marker='.',c=df1.indicator,cmap='bwr_r')
+        if store:
+            self.store(fig, f'latents_plot-{det.name}-{ds.name}')
+        return fig
     def plot_confusion_matrix(self,det,ds,conf_matrix,store=True):
         plt.close('all')
         fig, ax = plt.subplots(figsize=(7.5, 7.5))
@@ -204,6 +241,9 @@ class Evaluator:
             metrics = Evaluator.get_accuracy_precision_recall_fscore(y_test, anomaly)
             yield (anomaly.sum(), *metrics)
 
+    # the plot_scores function is modified to plot/ highlight an input sequence which is closer to the selected prototypes
+    # it can work with multiple detectors and datasets but stores the indices of the sequences that are closer to the
+    # prototypes.
     def plot_scores(self, store=True):
         detectors = self.detectors
         plt.close('all')
@@ -217,7 +257,15 @@ class Evaluator:
             sp = fig.add_subplot((2 * len(detectors) + 3), 1, 1)
             sp.set_title('original training data', loc=subtitle_loc)
             for col in X_train.columns:
-                plt.plot(X_train[col])
+                plt.plot(X_train[col],alpha= 0.5)
+            for det in detectors:
+                for k in range(self.proto_input_space_ind[(ds.name,det.name)].shape[0]):
+                    st_ind = int(self.proto_input_space_ind[(ds.name,det.name)][k,0].item()) * self.step
+                    seq_len = self.sequence_length
+                    end_ind = st_ind + seq_len
+                    for col in X_train.columns:
+                        plt.plot(X_train[col].iloc[st_ind:end_ind])
+                        plt.axvspan(st_ind,end_ind,color = 'black')
             sp = fig.add_subplot((2 * len(detectors) + 3), 1, 2)
             sp.set_title('original test set', loc=subtitle_loc)
             for col in X_test.columns:

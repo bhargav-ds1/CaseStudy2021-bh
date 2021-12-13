@@ -1,7 +1,4 @@
 import glob
-import os
-
-import numpy as np
 import pandas as pd
 
 from src.algorithms import LSTMED, GRUED
@@ -16,7 +13,7 @@ def main():
 
 
 def detectors(seed,step,sequence_length):
-    standard_epochs = 20
+    standard_epochs = 10
     dets = [
             LSTMED(num_epochs=standard_epochs, seed=seed,step=step,sequence_length=sequence_length)
             ]

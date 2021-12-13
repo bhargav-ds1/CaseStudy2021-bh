@@ -32,6 +32,8 @@ class LSTMED(Algorithm, PyTorchUtils):
         self.dropout = dropout
 
         self.lstmed = None
+        self.proto_input_space_ind = None
+        self.hidden_and_prototype_as_df = pd.DataFrame(columns=['hidden_and_prototype_sequences','indicator'])
         self.mean, self.cov,self.epoch_loss = None, None, None
 
     def loss_e(self,prototype,enc_hidden):
@@ -94,18 +96,37 @@ class LSTMED(Algorithm, PyTorchUtils):
             logging.debug(f'Epoch {epoch+1}/{self.num_epochs}.')
             loss_arr = []
             for ts_batch in train_loader:
-                output, enc_hidden = self.lstmed(self.to_var(ts_batch), return_latent =True)
+                output, enc_hidden,a = self.lstmed(self.to_var(ts_batch), return_latent =True)
                 loss_c = self.loss_c(self.lstmed.prototype_layer.prototype,enc_hidden)
                 loss_d = self.loss_d(self.lstmed.prototype_layer.prototype,d_min= 2.0)
                 loss_e =  self.loss_e(self.lstmed.prototype_layer.prototype,enc_hidden)
-                loss_w = torch.sum(torch.abs(self.lstmed.hidden2output.weight))
+                #loss_w = torch.sum(torch.abs(self.lstmed.hidden2output.weight))
                 loss = nn.MSELoss(size_average=False)(output, self.to_var(ts_batch.float()))+\
-                       0.1*loss_w + 1.0*loss_e + 0.01*loss_d + 1.0*loss_c
+                       loss_e + loss_d + loss_c
                 loss_arr.append(loss)
                 self.lstmed.zero_grad()
                 loss.backward()
                 optimizer.step()
             epoch_loss.append(sum(loss_arr))
+
+        a_min = torch.ones(self.lstmed.prototype_layer.k)
+        self.proto_input_space_ind = torch.Tensor(self.lstmed.prototype_layer.k,2)
+
+        for i in range(len(sequences)):
+            output, enc_hidden,a = self.lstmed(self.to_var(
+                torch.Tensor(sequences[i]).expand(1,sequences[i].shape[0],sequences[i].shape[1])),
+                return_latent =True)
+            self.hidden_and_prototype_as_df.loc[len(self.hidden_and_prototype_as_df)] = [enc_hidden[0].
+                                                                                            detach().numpy().tolist(),0]
+            for k in range(a.shape[1]):
+                if a_min[k] > a[torch.argmin(a[:,k]),k]:
+                    a_min[k] = a[torch.argmin(a[:,k]),k]
+                    self.proto_input_space_ind[k,:] = torch.Tensor([i,i+self.sequence_length])
+        for k in range(self.lstmed.prototype_layer.prototype.shape[0]):
+            self.hidden_and_prototype_as_df.loc[len(self.hidden_and_prototype_as_df)]=[self.lstmed.prototype_layer.
+                                                                            prototype[k].detach().numpy().tolist(),1]
+        print(self.proto_input_space_ind)
+        print(self.hidden_and_prototype_as_df)
 
         self.lstmed.eval()
         error_vectors = []
@@ -204,7 +225,7 @@ class LSTMEDModule(nn.Module, PyTorchUtils):
                                num_layers=self.n_layers[1], bias=self.use_bias[1], dropout=self.dropout[1])
         self.to_device(self.decoder)
         #-----------
-        self.prototype_layer = prototype_layer(self.hidden_size, seed, gpu, k=2)
+        self.prototype_layer = prototype_layer(self.hidden_size, seed, gpu, k=3)
         self.to_device(self.prototype_layer)
         #-----------
         self.hidden2output = nn.Linear(self.hidden_size, self.n_features)
@@ -239,6 +260,6 @@ class LSTMEDModule(nn.Module, PyTorchUtils):
             else:
                 _, dec_hidden = self.decoder(output[:, i].unsqueeze(1), dec_hidden)
 
-        self.prototype_layer(enc_hidden,batch_size)
+        a=self.prototype_layer(enc_hidden,batch_size)
 
-        return (output, enc_hidden[1][-1]) if return_latent else output
+        return (output, enc_hidden[1][-1],a) if return_latent else output
