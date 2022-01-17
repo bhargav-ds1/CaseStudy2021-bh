@@ -26,15 +26,16 @@ class RealPickledDataset(Dataset):
             with open(self.training_path, 'rb') as f:
                 X_train = pd.DataFrame(pickle.load(f))
             X_train = X_train.iloc[:, :-1]
-
+            #minimum, maximum = np.min(X_train),np.max(X_train)
             mean, std = X_train.mean(), X_train.std()
             X_train = (X_train - mean) / std
-
+            #X_train = (X_train - minimum) / (maximum - minimum)
             with open(self.test_path, 'rb') as f:
                 X_test = pd.DataFrame(pickle.load(f))
             y_test = X_test.iloc[:, -1]
             X_test = X_test.iloc[:, :-1]
             X_test = (X_test - mean) / std
+            #X_test = (X_test - minimum)/(maximum - minimum)
             self._data = X_train, np.zeros(len(X_train)), X_test, y_test
         return self._data
 
@@ -51,17 +52,18 @@ class RealCSVDataset(Dataset):
         if self._data is None:
             with open(self.training_path, 'rb') as f:
                 X_train = pd.read_csv(f,names=['Feature'],index_col=False)
-            print(X_train)
             X_train = X_train.iloc[:, :]
-            mean, std = X_train.mean(), X_train.std()
-            X_train = (X_train - mean) / std
-            print(X_train)
+            minimum, maximum = np.min(X_train),np.max(X_train)
+            #mean, std = X_train.mean(), X_train.std()
+            #X_train = (X_train - mean) / std
+            X_train = (X_train - minimum) / (maximum - minimum)
+
 
             with open(self.test_path, 'rb') as f:
                 X_test = pd.read_csv(f,names=['Feature','outlier'],index_col=False)
             y_test = X_test.iloc[:, -1]
             X_test = X_test.iloc[:, :-1]
-            X_test = (X_test - mean) / std
-
+            #X_test = (X_test - mean) / std
+            X_test = (X_test - minimum)/(maximum - minimum)
             self._data = X_train, np.zeros(len(X_train)), X_test, y_test
         return self._data

@@ -21,8 +21,9 @@ from tabulate import tabulate
 from .config import init_logging
 
 
+
 class Evaluator:
-    def __init__(self, datasets: list, detectors: callable,step, sequence_length, output_dir: {str} = None, seed: int = None,
+    def __init__(self, datasets: list, detectors: callable,step, sequence_length, n_prototypes,output_dir: {str} = None, seed: int = None,
                  create_log_file=True):
         """
         :param datasets: list of datasets
@@ -33,6 +34,7 @@ class Evaluator:
         self._detectors = detectors
         self.step = step
         self.sequence_length = sequence_length
+        self.n_prototypes = n_prototypes
         self.output_dir = output_dir or 'reports'
         self.results = dict()
         self.proto_input_space_ind = dict()
@@ -46,7 +48,7 @@ class Evaluator:
 
     @property
     def detectors(self):
-        detectors = self._detectors(self.seed,self.step,self.sequence_length)
+        detectors = self._detectors(self.seed,self.step,self.sequence_length,self.n_prototypes)
         assert np.unique([x.name for x in detectors]).size == len(detectors), 'Some detectors have the same name!'
         return detectors
 
@@ -95,17 +97,6 @@ class Evaluator:
         self.results = save_dict['results']
 
     @staticmethod
-    def get_accuracy_precision_recall_fscore(y_true: list, y_pred: list):
-        accuracy = accuracy_score(y_true, y_pred)
-        # warn_for=() avoids log warnings for any result being zero
-        precision, recall, f_score, _ = prf(y_true, y_pred, average='binary', warn_for=())
-        if precision == 0 and recall == 0:
-            f01_score = 0
-        else:
-            f01_score = fbeta_score(y_true, y_pred, average='binary', beta=0.05)
-        return accuracy, precision, recall, f_score, f01_score
-
-    @staticmethod
     def get_auroc(det, ds, score):
         if np.isnan(score).all():
             score = np.zeros_like(score)
@@ -126,7 +117,33 @@ class Evaluator:
         if return_metrics:
             return anomalies, acc, prec, rec, f_score, f01_score, threshold
         else:
-            return threshold[np.argmax(f_score)]
+            return threshold[np.argmax(f01_score)]
+
+    def get_metrics_by_thresholds(self, y_test: list, score: list, thresholds: list):
+        for threshold in thresholds:
+            anomaly = self.binarize(score, threshold=threshold)
+            metrics = Evaluator.get_accuracy_precision_recall_fscore(y_test, anomaly)
+            yield (anomaly.sum(), *metrics)
+
+
+    def binarize(self, score, threshold=None):
+        threshold = threshold if threshold is not None else self.threshold(score)
+        score = np.where(np.isnan(score), np.nanmin(score) - sys.float_info.epsilon, score)
+        return np.where(score >= threshold, 1, 0)
+
+    def threshold(self, score):
+        return np.nanmean(score) + 2 * np.nanstd(score)
+
+    @staticmethod
+    def get_accuracy_precision_recall_fscore(y_true: list, y_pred: list):
+        accuracy = accuracy_score(y_true, y_pred)
+        # warn_for=() avoids log warnings for any result being zero
+        precision, recall, f_score, _ = prf(y_true, y_pred, average='binary', warn_for=())
+        if precision == 0 and recall == 0:
+            f01_score = 0
+        else:
+            f01_score = fbeta_score(y_true, y_pred, average='binary', beta=0.05)
+        return accuracy, precision, recall, f_score, f01_score
 
     def evaluate(self):
         for ds in progressbar.progressbar(self.datasets):
@@ -190,7 +207,12 @@ class Evaluator:
             end_ind = st_ind + seq_len
             for col in X_train.columns:
                 plt.subplot(n_proto,1,k+1)
-                plt.plot(X_train[col].iloc[(st_ind-(seq_len*2)):(end_ind+(seq_len*2))])
+                if st_ind - (seq_len*2)<0:
+                    plt.plot(X_train[col].iloc[(st_ind):(end_ind+(seq_len*2))])
+                elif end_ind + (seq_len*2)>=X_train.shape[0]:
+                    plt.plot(X_train[col].iloc[((st_ind)-(seq_len*2)):(end_ind)])
+                else:
+                    plt.plot(X_train[col].iloc[(st_ind)-(seq_len*2):(end_ind+(seq_len*2))])
                 plt.plot(X_train[col].iloc[st_ind:end_ind])
                 plt.ylabel(f'Proto-{k}')
         if store:
@@ -201,7 +223,7 @@ class Evaluator:
     def plot_latents_and_prototypes(self,det,ds,df,store = True):
         plt.close('all')
         df1 = df.hidden_and_prototype_sequences.apply(pd.Series).assign(**{'indicator':df.indicator})
-        tnse = TSNE(n_components = 2 , verbose = 0, perplexity = 5 , n_iter = 300)
+        tnse = TSNE(n_components = 2 , verbose = 0, perplexity = 30 , n_iter = 5000)
         tnse_results = tnse.fit_transform(df1.iloc[:,:-1])
         fig = plt.figure()
         plt.scatter(tnse_results[:,0],tnse_results[:,1],marker='.',c=df1.indicator,cmap='bwr_r')
@@ -234,12 +256,6 @@ class Evaluator:
         if store:
             self.store(fig, f'epoch_loss_plot-{det.name}-{ds.name}')
         return fig
-
-    def get_metrics_by_thresholds(self, y_test: list, score: list, thresholds: list):
-        for threshold in thresholds:
-            anomaly = self.binarize(score, threshold=threshold)
-            metrics = Evaluator.get_accuracy_precision_recall_fscore(y_test, anomaly)
-            yield (anomaly.sum(), *metrics)
 
     # the plot_scores function is modified to plot/ highlight an input sequence which is closer to the selected prototypes
     # it can work with multiple detectors and datasets but stores the indices of the sequences that are closer to the
@@ -668,11 +684,3 @@ class Evaluator:
         self.gen_merged_latex_per_algorithm(std_results, f'std_{det_title_suffix}', store=store)
         self.print_merged_table_per_algorithm(avg_results_renamed)
         self.gen_merged_latex_per_algorithm(avg_results_renamed, f'avg_{det_title_suffix}', store=store)
-
-    def binarize(self, score, threshold=None):
-        threshold = threshold if threshold is not None else self.threshold(score)
-        score = np.where(np.isnan(score), np.nanmin(score) - sys.float_info.epsilon, score)
-        return np.where(score >= threshold, 1, 0)
-
-    def threshold(self, score):
-        return np.nanmean(score) + 2 * np.nanstd(score)

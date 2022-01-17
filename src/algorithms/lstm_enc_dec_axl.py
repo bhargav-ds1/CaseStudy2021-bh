@@ -1,5 +1,4 @@
 import logging
-
 import numpy as np
 import pandas as pd
 import torch
@@ -7,22 +6,24 @@ import torch.nn as nn
 from scipy.stats import multivariate_normal
 from torch.utils.data import DataLoader
 from torch.utils.data.sampler import SubsetRandomSampler
+from torch.optim.lr_scheduler import StepLR
 from tqdm import trange
 
 from .algorithm_utils import Algorithm, PyTorchUtils
 
 
 class LSTMED(Algorithm, PyTorchUtils):
-    def __init__(self, name: str = 'LSTM-ED', num_epochs: int = 20, batch_size: int = 30, lr: float = 1e-3,
-                 hidden_size: int = 5, sequence_length: int = 30, train_gaussian_percentage: float = 0.20,
+    def __init__(self, name: str = 'LSTM-ED', num_epochs: int = 40, batch_size: int = 4, lr: float = 1e-3,
+                 hidden_size: int = 45, sequence_length: int = 30, train_gaussian_percentage: float = 0.10,
                  n_layers: tuple = (1, 1), use_bias: tuple = (True, True), dropout: tuple = (0, 0),
-                 seed: int = None, gpu: int = None, details=True, step: int=1):
+                 seed: int = None, gpu: int = None, details=True, step: int=1, n_prototypes:int = 2):
         Algorithm.__init__(self, __name__, name, seed, details=details)
         PyTorchUtils.__init__(self, seed, gpu)
         self.num_epochs = num_epochs
         self.batch_size = batch_size
         self.lr = lr
         self.step = step
+        self.n_prototypes = n_prototypes
         self.hidden_size = hidden_size
         self.sequence_length = sequence_length
         self.train_gaussian_percentage = train_gaussian_percentage
@@ -32,7 +33,11 @@ class LSTMED(Algorithm, PyTorchUtils):
         self.dropout = dropout
 
         self.lstmed = None
+        # tensor to store the indices of the input sequences whose hidden space representation is closer to the
+        # prototypes
         self.proto_input_space_ind = None
+        # tensor to store all the hidden space and prototype in a dataframe to plot them in a 2-d space using any
+        # dimension reduction techniques
         self.hidden_and_prototype_as_df = pd.DataFrame(columns=['hidden_and_prototype_sequences','indicator'])
         self.mean, self.cov,self.epoch_loss = None, None, None
 
@@ -49,7 +54,7 @@ class LSTMED(Algorithm, PyTorchUtils):
         k_list = torch.stack(k_list)
         return torch.sum(k_list)
 
-    def loss_d(self,prototype,d_min = 2.0):
+    def loss_d(self,prototype,d_min = torch.tensor(2.0)):
         sum = torch.tensor(0)
         for i in range(prototype.shape[0]):
             for j in range(i+1,prototype.shape[0]):
@@ -78,6 +83,11 @@ class LSTMED(Algorithm, PyTorchUtils):
         X.bfill(inplace=True)
         data = X.values
         sequences = [data[i:i + self.sequence_length] for i in range(0, data.shape[0] - self.sequence_length +1,self.step)]
+        print('Number of sequences:'+ str(len(sequences)))
+        print('Batch size:'+str(self.batch_size))
+        print('Sequence Length:'+str(self.sequence_length))
+        print('hidden size:'+str(self.hidden_size))
+        print('Epochs:'+str(self.num_epochs))
         indices = np.random.permutation(len(sequences))
         split_point = int(self.train_gaussian_percentage * len(sequences))
         train_loader = DataLoader(dataset=sequences, batch_size=self.batch_size, drop_last=True,
@@ -87,29 +97,36 @@ class LSTMED(Algorithm, PyTorchUtils):
 
         self.lstmed = LSTMEDModule(X.shape[1], self.hidden_size,
                                    self.n_layers, self.use_bias, self.dropout,
-                                   seed=self.seed, gpu=self.gpu)
+                                   seed=self.seed,n_prototypes=self.n_prototypes, gpu=self.gpu)
         self.to_device(self.lstmed)
         optimizer = torch.optim.Adam(self.lstmed.parameters(), lr=self.lr)
+        #optimizer = torch.optim.SGD(self.lstmed.parameters(), lr=1.00)
+        #scheduler = StepLR(optimizer,step_size=1,gamma=0.85)
         self.lstmed.train()
         epoch_loss = []
         for epoch in trange(self.num_epochs):
             logging.debug(f'Epoch {epoch+1}/{self.num_epochs}.')
             loss_arr = []
+            #if epoch > 10:
+                #scheduler.step()
             for ts_batch in train_loader:
                 output, enc_hidden,a = self.lstmed(self.to_var(ts_batch), return_latent =True)
                 loss_c = self.loss_c(self.lstmed.prototype_layer.prototype,enc_hidden)
-                loss_d = self.loss_d(self.lstmed.prototype_layer.prototype,d_min= 2.0)
+                loss_d = self.loss_d(self.lstmed.prototype_layer.prototype)
                 loss_e =  self.loss_e(self.lstmed.prototype_layer.prototype,enc_hidden)
+                loss_mse = nn.MSELoss(size_average=False)(output, self.to_var(ts_batch.float()))
                 #loss_w = torch.sum(torch.abs(self.lstmed.hidden2output.weight))
-                loss = nn.MSELoss(size_average=False)(output, self.to_var(ts_batch.float()))+\
-                       loss_e + loss_d + loss_c
+                loss = loss_mse + loss_e + loss_d + loss_c
+                print('loss_mse:'+str(loss_mse)+'loss_c:'+str(loss_c)+'loss_d:'+str(loss_d)+'loss_e:'+str(loss_e))
                 loss_arr.append(loss)
                 self.lstmed.zero_grad()
                 loss.backward()
                 optimizer.step()
-            epoch_loss.append(sum(loss_arr))
+            epoch_loss.append(sum(loss_arr)) # This list of epoch losses are used to plot the epoch-loss plot
 
+        # Here we find the indices of the input sequences whose hidden space is closer to the prototypes.
         a_min = torch.ones(self.lstmed.prototype_layer.k)
+        # tensor to store the indices of the inputs whose hidden space representation is closer to the prototypes.
         self.proto_input_space_ind = torch.Tensor(self.lstmed.prototype_layer.k,2)
 
         for i in range(len(sequences)):
@@ -130,7 +147,7 @@ class LSTMED(Algorithm, PyTorchUtils):
 
         self.lstmed.eval()
         error_vectors = []
-        for ts_batch in train_gaussian_loader:
+        for ts_batch in train_loader:
             output = self.lstmed(self.to_var(ts_batch))
             error = nn.L1Loss(reduce=False)(output, self.to_var(ts_batch.float()))
             error_vectors += list(error.view(-1, X.shape[1]).data.cpu().numpy())
@@ -165,34 +182,37 @@ class LSTMED(Algorithm, PyTorchUtils):
         scores = np.concatenate(scores)
         lattice = np.full((self.sequence_length, data.shape[0]), np.nan)
         for i, score in enumerate(scores):
-            lattice[i % self.sequence_length, i:i + self.sequence_length] = score
+            lattice[i % self.sequence_length, (i*self.step):(i*self.step) + self.sequence_length] = score
+        np.nan_to_num(lattice)
         scores = np.nanmean(lattice, axis=0)
 
         if self.details:
             outputs = np.concatenate(outputs)
             lattice = np.full((self.sequence_length, X.shape[0], X.shape[1]), np.nan)
             for i, output in enumerate(outputs):
-                lattice[i % self.sequence_length, i:i + self.sequence_length, :] = output
+                lattice[i % self.sequence_length, (i*self.step):(i*self.step) + self.sequence_length, :] = output
+            np.nan_to_num(lattice)
             self.prediction_details.update({'reconstructions_mean': np.nanmean(lattice, axis=0).T})
 
             errors = np.concatenate(errors)
             lattice = np.full((self.sequence_length, X.shape[0], X.shape[1]), np.nan)
             for i, error in enumerate(errors):
-                lattice[i % self.sequence_length, i:i + self.sequence_length, :] = error
+                lattice[i % self.sequence_length, (i*self.step):(i*self.step) + self.sequence_length, :] = error
+            np.nan_to_num(lattice)
             self.prediction_details.update({'errors_mean': np.nanmean(lattice, axis=0).T})
 
         return scores
 
 class prototype_layer(nn.Module, PyTorchUtils):
-    def __init__(self,hidden_size: int, seed:int, gpu:int,k=2):
+    def __init__(self,hidden_size: int, k:int ,seed:int, gpu:int):
         super().__init__()
         PyTorchUtils.__init__(self,seed,gpu)
         self.hidden_size = hidden_size
         self.k = k
         self.prototype_size = torch.Tensor(k,hidden_size)
-        self.init_values = nn.init.uniform(self.prototype_size,a=0.0,b=1.0)
-        self.prototype = nn.Parameter(self.init_values)
-        self.similarity2output = nn.Linear(self.k,2)
+        self.init_values = nn.init.uniform(self.prototype_size,a=-1.0,b=1.0)
+        self.prototype = nn.Parameter(self.init_values,requires_grad=True)
+        #self.similarity2output = nn.Linear(self.k,2)
     def forward(self,x,batch_size):
         a = torch.zeros((batch_size,self.k))
         d = x[0].unsqueeze(1) - self.prototype.unsqueeze(1)
@@ -208,12 +228,12 @@ class prototype_layer(nn.Module, PyTorchUtils):
 class LSTMEDModule(nn.Module, PyTorchUtils):
     def __init__(self, n_features: int, hidden_size: int,
                  n_layers: tuple, use_bias: tuple, dropout: tuple,
-                 seed: int, gpu: int):
+                 seed: int, n_prototypes:int , gpu: int):
         super().__init__()
         PyTorchUtils.__init__(self, seed, gpu)
         self.n_features = n_features
         self.hidden_size = hidden_size
-
+        self.n_prototypes = n_prototypes
         self.n_layers = n_layers
         self.use_bias = use_bias
         self.dropout = dropout
@@ -225,7 +245,7 @@ class LSTMEDModule(nn.Module, PyTorchUtils):
                                num_layers=self.n_layers[1], bias=self.use_bias[1], dropout=self.dropout[1])
         self.to_device(self.decoder)
         #-----------
-        self.prototype_layer = prototype_layer(self.hidden_size, seed, gpu, k=3)
+        self.prototype_layer = prototype_layer(self.hidden_size, self.n_prototypes,seed, gpu )
         self.to_device(self.prototype_layer)
         #-----------
         self.hidden2output = nn.Linear(self.hidden_size, self.n_features)
@@ -262,4 +282,4 @@ class LSTMEDModule(nn.Module, PyTorchUtils):
 
         a=self.prototype_layer(enc_hidden,batch_size)
 
-        return (output, enc_hidden[1][-1],a) if return_latent else output
+        return (output, enc_hidden[0][-1],a) if return_latent else output

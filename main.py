@@ -12,10 +12,10 @@ def main():
     evaluate_real_datasets()
 
 
-def detectors(seed,step,sequence_length):
-    standard_epochs = 10
+def detectors(seed,step,sequence_length,n_prototypes):
+    standard_epochs = 40
     dets = [
-            LSTMED(num_epochs=standard_epochs, seed=seed,step=step,sequence_length=sequence_length)
+            LSTMED(num_epochs=standard_epochs, seed=seed,step=step,sequence_length=sequence_length, n_prototypes = n_prototypes)
             ]
 
     return sorted(dets, key=lambda x: x.framework)
@@ -75,7 +75,7 @@ def evaluate_real_datasets():
             datasets.append(dataset)
 
     for seed in seeds:
-        evaluator = Evaluator(datasets, detectors, seed=seed, step=1, sequence_length=30)
+        evaluator = Evaluator(datasets, detectors, seed=seed, step=1, sequence_length=30,n_prototypes=2)
         evaluator.evaluate()
         result = evaluator.benchmarks()
         evaluator.plot_roc_curves()
