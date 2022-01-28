@@ -75,7 +75,7 @@ def evaluate_real_datasets():
             datasets.append(dataset)
 
     for seed in seeds:
-        evaluator = Evaluator(datasets, detectors, seed=seed, step=1, sequence_length=30,n_prototypes=2)
+        evaluator = Evaluator(datasets, detectors, seed=seed, step=500, sequence_length=500,n_prototypes=2)
         evaluator.evaluate()
         result = evaluator.benchmarks()
         evaluator.plot_roc_curves()

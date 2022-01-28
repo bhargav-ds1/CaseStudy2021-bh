@@ -117,7 +117,8 @@ class Evaluator:
         if return_metrics:
             return anomalies, acc, prec, rec, f_score, f01_score, threshold
         else:
-            return threshold[np.argmax(f01_score)]
+            return np.nanmean(score) + (2*np.nanstd(score))
+            #return threshold[np.argmax(f01_score)]
 
     def get_metrics_by_thresholds(self, y_test: list, score: list, thresholds: list):
         for threshold in thresholds:
@@ -145,6 +146,17 @@ class Evaluator:
             f01_score = fbeta_score(y_true, y_pred, average='binary', beta=0.05)
         return accuracy, precision, recall, f_score, f01_score
 
+    def space_shuttle_data_loader(sequence_length, step):
+        print("Combining the datasets TEK14,TEK16,TEK17")
+        X_train_c = pd.DataFrame()
+        for data_set_path in glob.glob('./*'):
+            with open(data_set_path,'rb') as f:
+                X_train = pd.DataFrame(pickle.load(f))
+                ind = [i for i in range(0, X_train.shape[0] - sequence_length +1, step)][-1]
+                ind = ind + sequence_length
+                X_train = X_train.iloc[0:ind]
+                X_train_c = X_train_c.append(X_train)
+                X_train_c.to_pickle(f'TEK_14_16_17_seq_{sequence_length}_step_{step}.pkl')
     def evaluate(self):
         for ds in progressbar.progressbar(self.datasets):
             (X_train, y_train, X_test, y_test) = ds.data()
@@ -154,10 +166,12 @@ class Evaluator:
                     det.fit(X_train.copy())
                     score = det.predict(X_test.copy())
                     self.results[(ds.name, det.name)] = score
-                    self.proto_input_space_ind[(ds.name,det.name)] = det.proto_input_space_ind
+                    self.proto_input_space_ind[(ds.name,det.name)] = det.proto_input_space_ind.detach().numpy()
                     self.plot_prototypes_in_input_space(det,ds)
+                    self.plot_input_sequences_closer_to_prototypes_input_space(det,ds)
+                    self.plot_latents_and_prototypes(det,ds,det.hidden_and_prototype_as_df)
                     try:
-                        self.plot_latents_and_prototypes(det,ds,det.hidden_and_prototype_as_df)
+
 
                         self.plot_details(det, ds, score)
                         self.plot_epoch_loss(det,ds)
@@ -175,7 +189,8 @@ class Evaluator:
             _, _, _, y_test = ds.data()
             for det in self.detectors:
                 score = self.results[(ds.name, det.name)]
-                y_pred = self.binarize(score, self.get_optimal_threshold(det, y_test, np.array(score)))
+                #y_pred = self.binarize(score, self.get_optimal_threshold(det, y_test, np.array(score)))
+                y_pred = self.binarize(score, self.threshold(np.array(score)))
                 acc, prec, rec, f1_score, f01_score = self.get_accuracy_precision_recall_fscore(y_test, y_pred)
                 confusion_mat = confusion_matrix(y_test,y_pred,labels=[0,1])
                 self.plot_confusion_matrix(det,ds,confusion_mat)
@@ -200,33 +215,71 @@ class Evaluator:
         plt.close('all')
         fig = plt.figure()
         X_train, y_train, X_test, y_test = ds.data()
-        n_proto = self.proto_input_space_ind[(ds.name,det.name)].shape[0]
+        n_proto = self.proto_input_space_ind[(ds.name,det.name)].shape[1]
         for k in range(n_proto):
-            st_ind = int(self.proto_input_space_ind[(ds.name,det.name)][k,0].item()) * self.step
+            st_ind = np.argmin(self.proto_input_space_ind[(ds.name,det.name)][:,k]) * self.step
             seq_len = self.sequence_length
             end_ind = st_ind + seq_len
             for col in X_train.columns:
                 plt.subplot(n_proto,1,k+1)
-                if st_ind - (seq_len*2)<0:
-                    plt.plot(X_train[col].iloc[(st_ind):(end_ind+(seq_len*2))])
-                elif end_ind + (seq_len*2)>=X_train.shape[0]:
-                    plt.plot(X_train[col].iloc[((st_ind)-(seq_len*2)):(end_ind)])
+                if (st_ind - (seq_len*2)) < 0:
+                    plt.plot(X_train[col].iloc[(0):(end_ind+(seq_len*2))],label='Original input sequence')
+                elif (end_ind + (seq_len*2)) >= X_train.shape[0]:
+                    plt.plot(X_train[col].iloc[((st_ind)-(seq_len*2)):(X_train.shape[0])],label='Original input sequence')
                 else:
-                    plt.plot(X_train[col].iloc[(st_ind)-(seq_len*2):(end_ind+(seq_len*2))])
-                plt.plot(X_train[col].iloc[st_ind:end_ind])
+                    plt.plot(X_train[col].iloc[(st_ind)-(seq_len*2):(end_ind+(seq_len*2))],label='Original input sequence')
+                plt.plot(X_train[col].iloc[st_ind:end_ind],label = 'Input sequence closest to prototype')
                 plt.ylabel(f'Proto-{k}')
+                plt.legend(fontsize = 6)
+                plt.suptitle('Input sequences closest to the prototypes in hidden space.')
         if store:
             self.store(fig, f'inputs_closest_to_prototypes-{det.name}-{ds.name}')
         return fig
+
+
+    def plot_input_sequences_closer_to_prototypes_input_space(self, det, ds, store=True):
+        plt.close('all')
+        fig = plt.figure()
+        X_train, y_train, X_test, y_test = ds.data()
+        n_proto = self.proto_input_space_ind[(ds.name, det.name)].shape[1]
+        for k in range(n_proto):
+            plt.subplot(n_proto,1,k+1)
+            st = np.argsort(self.proto_input_space_ind[(ds.name,det.name)][:,k])
+            for i in range(0,int(st.shape[0]//4)):
+                for col in X_train.columns:
+                    classes = ['Prototype in input space','Similar Input sequences('+str(int(st.shape[0]//4)+1)+')']
+                    st_ind = st[i] * self.step
+                    seq_len = self.sequence_length
+                    end_ind = st_ind + seq_len
+                    if(i==0):
+                        plt.plot(X_train[col].iloc[st_ind:end_ind].to_list(),c='blue')
+                    else:
+                        plt.plot(X_train[col].iloc[st_ind:end_ind].to_list(), c='deepskyblue',alpha = 0.2)
+                    plt.ylabel(f'Proto-{k}')
+                    plt.legend(classes)
+        if store:
+            self.store(fig, f'input_sequences_closer_to_prototypes_input_space-{det.name}-{ds.name}')
+        return fig
+
+
     # plot_latents_and_prototypes function gathers the hidden space for the inputs along with the prototypes and maps them
     # to 2 dimensions by using tnse approach of dimensionality reduction and plots them as a points in the latent space.
     def plot_latents_and_prototypes(self,det,ds,df,store = True):
         plt.close('all')
         df1 = df.hidden_and_prototype_sequences.apply(pd.Series).assign(**{'indicator':df.indicator})
-        tnse = TSNE(n_components = 2 , verbose = 0, perplexity = 30 , n_iter = 5000)
-        tnse_results = tnse.fit_transform(df1.iloc[:,:-1])
+        p = int(np.round((df1.loc[:,df1.columns!='indicator'].shape[0])**(1/2)))
+        tnse = TSNE(n_components = 2 , verbose = 0, perplexity = p , n_iter = 5000)
+        tnse_results = tnse.fit_transform(df1.loc[:,df1.columns!='indicator'])
         fig = plt.figure()
-        plt.scatter(tnse_results[:,0],tnse_results[:,1],marker='.',c=df1.indicator,cmap='bwr_r')
+        plt.title('The latents & prototypes in 2D latent space (tSNE)')
+        classes = ['lantents', 'protototypes']
+        ss = [(lambda x: 25 if x==0 else 500)(x) for x in df1.indicator]
+        scatter = plt.scatter(tnse_results[:, 0], tnse_results[:, 1], marker='.', c=df1.indicator, cmap='bwr_r', s=ss)
+        plt.legend(handles = scatter.legend_elements()[0], labels = classes)
+        #plt.scatter(tnse_results[:,0],tnse_results[:,1],marker='.',c=df1.indicator,cmap='bwr_r',label=df1.indicator)
+        plt.xlabel('First dimension')
+        plt.ylabel('Second dimension')
+        #plt.legend()
         if store:
             self.store(fig, f'latents_plot-{det.name}-{ds.name}')
         return fig
@@ -248,6 +301,7 @@ class Evaluator:
     def plot_epoch_loss(self,det,ds,store=True):
         plt.close('all')
         fig = plt.figure()
+        plt.title('Epoch - loss plot.')
         arr = []
         for i in det.epoch_loss:
             arr.append(i.item())

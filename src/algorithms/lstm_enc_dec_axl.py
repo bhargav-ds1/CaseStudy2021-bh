@@ -6,15 +6,15 @@ import torch.nn as nn
 from scipy.stats import multivariate_normal
 from torch.utils.data import DataLoader
 from torch.utils.data.sampler import SubsetRandomSampler
-from torch.optim.lr_scheduler import StepLR
+#from torch.optim.lr_scheduler import StepLR
 from tqdm import trange
 
 from .algorithm_utils import Algorithm, PyTorchUtils
 
 
 class LSTMED(Algorithm, PyTorchUtils):
-    def __init__(self, name: str = 'LSTM-ED', num_epochs: int = 40, batch_size: int = 4, lr: float = 1e-3,
-                 hidden_size: int = 45, sequence_length: int = 30, train_gaussian_percentage: float = 0.10,
+    def __init__(self, name: str = 'LSTM-ED', num_epochs: int = 40, batch_size: int = 1, lr: float = 1e-3,
+                 hidden_size: int = 300, sequence_length: int = 30, train_gaussian_percentage: float = 0.10,
                  n_layers: tuple = (1, 1), use_bias: tuple = (True, True), dropout: tuple = (0, 0),
                  seed: int = None, gpu: int = None, details=True, step: int=1, n_prototypes:int = 2):
         Algorithm.__init__(self, __name__, name, seed, details=details)
@@ -83,16 +83,18 @@ class LSTMED(Algorithm, PyTorchUtils):
         X.bfill(inplace=True)
         data = X.values
         sequences = [data[i:i + self.sequence_length] for i in range(0, data.shape[0] - self.sequence_length +1,self.step)]
+        print('X_train.shape:'+str(X.shape))
         print('Number of sequences:'+ str(len(sequences)))
         print('Batch size:'+str(self.batch_size))
         print('Sequence Length:'+str(self.sequence_length))
+        print('Step size:'+str(self.step))
         print('hidden size:'+str(self.hidden_size))
         print('Epochs:'+str(self.num_epochs))
         indices = np.random.permutation(len(sequences))
         split_point = int(self.train_gaussian_percentage * len(sequences))
-        train_loader = DataLoader(dataset=sequences, batch_size=self.batch_size, drop_last=True,
-                                  sampler=SubsetRandomSampler(indices[:-split_point]), pin_memory=True)
-        train_gaussian_loader = DataLoader(dataset=sequences, batch_size=self.batch_size, drop_last=True,
+        train_loader = DataLoader(dataset=sequences, batch_size=self.batch_size, drop_last=False,
+                                  sampler=SubsetRandomSampler(indices), pin_memory=True)
+        train_gaussian_loader = DataLoader(dataset=sequences, batch_size=self.batch_size, drop_last=False,
                                            sampler=SubsetRandomSampler(indices[-split_point:]), pin_memory=True)
 
         self.lstmed = LSTMEDModule(X.shape[1], self.hidden_size,
@@ -125,9 +127,9 @@ class LSTMED(Algorithm, PyTorchUtils):
             epoch_loss.append(sum(loss_arr)) # This list of epoch losses are used to plot the epoch-loss plot
 
         # Here we find the indices of the input sequences whose hidden space is closer to the prototypes.
-        a_min = torch.ones(self.lstmed.prototype_layer.k)
+        #a_min = torch.ones(self.lstmed.prototype_layer.k)
         # tensor to store the indices of the inputs whose hidden space representation is closer to the prototypes.
-        self.proto_input_space_ind = torch.Tensor(self.lstmed.prototype_layer.k,2)
+        self.proto_input_space_ind = torch.full((len(sequences),self.lstmed.prototype_layer.k),-1.)
 
         for i in range(len(sequences)):
             output, enc_hidden,a = self.lstmed(self.to_var(
@@ -135,10 +137,11 @@ class LSTMED(Algorithm, PyTorchUtils):
                 return_latent =True)
             self.hidden_and_prototype_as_df.loc[len(self.hidden_and_prototype_as_df)] = [enc_hidden[0].
                                                                                             detach().numpy().tolist(),0]
-            for k in range(a.shape[1]):
-                if a_min[k] > a[torch.argmin(a[:,k]),k]:
-                    a_min[k] = a[torch.argmin(a[:,k]),k]
-                    self.proto_input_space_ind[k,:] = torch.Tensor([i,i+self.sequence_length])
+            self.proto_input_space_ind[i] = a
+            #for k in range(a.shape[1]):
+            #    if a_min[k] > a[torch.argmin(a[:,k]),k]:
+            #        a_min[k] = a[torch.argmin(a[:,k]),k]
+            #       self.proto_input_space_ind[k,:] = torch.Tensor([i,i+self.sequence_length])
         for k in range(self.lstmed.prototype_layer.prototype.shape[0]):
             self.hidden_and_prototype_as_df.loc[len(self.hidden_and_prototype_as_df)]=[self.lstmed.prototype_layer.
                                                                             prototype[k].detach().numpy().tolist(),1]
