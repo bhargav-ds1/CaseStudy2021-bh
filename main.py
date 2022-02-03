@@ -1,6 +1,7 @@
 import glob
 import pandas as pd
-
+import matplotlib.pyplot as plt
+import numpy as np
 from src.algorithms import LSTMED, GRUED
 from src.datasets import RealPickledDataset
 from src.evaluation import Evaluator
@@ -73,21 +74,23 @@ def evaluate_real_datasets():
             data_set_name = data_set_path.split('/')[-1].replace('.pkl', '')
             dataset = RealPickledDataset(data_set_name, data_set_path)
             datasets.append(dataset)
+    for i in range(2,1501,10):
+        for seed in seeds:
+            evaluator = Evaluator(datasets, detectors, seed=seed, step=i, sequence_length=i,n_prototypes=2)
+            evaluator.evaluate()
+            result = evaluator.benchmarks()
 
-    for seed in seeds:
-        evaluator = Evaluator(datasets, detectors, seed=seed, step=500, sequence_length=500,n_prototypes=2)
-        evaluator.evaluate()
-        result = evaluator.benchmarks()
-        evaluator.plot_roc_curves()
-        evaluator.plot_threshold_comparison()
-        evaluator.plot_scores()
-        results = results.append(result, ignore_index=True)
+            evaluator.plot_roc_curves()
+            evaluator.plot_threshold_comparison()
+            #evaluator.plot_scores()
+            results = results.append(result, ignore_index=True)
 
-    avg_results = results.groupby(['dataset', 'algorithm'], as_index=False).mean()
-    evaluator.set_benchmark_results(avg_results)
-    evaluator.export_results('run_real_datasets')
-    evaluator.create_boxplots(runs=RUNS, data=results, detectorwise=False)
-    evaluator.create_boxplots(runs=RUNS, data=results, detectorwise=True)
+        avg_results = results.groupby(['dataset', 'algorithm'], as_index=False).mean()
+        evaluator.set_benchmark_results(avg_results)
+        evaluator.export_results('run_real_datasets')
+        evaluator.create_boxplots(runs=RUNS, data=results, detectorwise=False)
+        evaluator.create_boxplots(runs=RUNS, data=results, detectorwise=True)
+        results.to_pickle('results.pkl')
 
 
 if __name__ == '__main__':

@@ -59,7 +59,8 @@ class Combine_space_shuttle_data:
                 X_train = X_train.iloc[0:ind]
                 X_train_c = X_train_c.append(X_train)
                 print(X_train_c.shape)
-                X_train_c.to_pickle(f'TEK_14_16_17_seq_{sequence_length}_step_{step}.pkl')
+        X_train_c = X_train_c.reset_index(drop=True)
+        X_train_c.to_pickle(f'TEK_14_16_17_seq_{sequence_length}_step_{step}.pkl')
 
 class RealCSVDataset(Dataset):
     """Class for pickled datasets from https://github.com/chickenbestlover/RNN-Time-series-Anomaly-Detection"""

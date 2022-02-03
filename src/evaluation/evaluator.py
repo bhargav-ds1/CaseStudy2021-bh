@@ -117,8 +117,8 @@ class Evaluator:
         if return_metrics:
             return anomalies, acc, prec, rec, f_score, f01_score, threshold
         else:
-            return np.nanmean(score) + (2*np.nanstd(score))
-            #return threshold[np.argmax(f01_score)]
+            #return np.nanmean(score) + (2*np.nanstd(score))
+            return threshold[np.argmax(f01_score)]
 
     def get_metrics_by_thresholds(self, y_test: list, score: list, thresholds: list):
         for threshold in thresholds:
@@ -166,10 +166,10 @@ class Evaluator:
                     det.fit(X_train.copy())
                     score = det.predict(X_test.copy())
                     self.results[(ds.name, det.name)] = score
-                    self.proto_input_space_ind[(ds.name,det.name)] = det.proto_input_space_ind.detach().numpy()
-                    self.plot_prototypes_in_input_space(det,ds)
-                    self.plot_input_sequences_closer_to_prototypes_input_space(det,ds)
-                    self.plot_latents_and_prototypes(det,ds,det.hidden_and_prototype_as_df)
+                    #self.proto_input_space_ind[(ds.name,det.name)] = det.proto_input_space_ind.detach().numpy()
+                    #self.plot_prototypes_in_input_space(det,ds)
+                    #self.plot_input_sequences_closer_to_prototypes_input_space(det,ds)
+                    #self.plot_latents_and_prototypes(det,ds,det.hidden_and_prototype_as_df)
                     try:
 
 
@@ -189,8 +189,8 @@ class Evaluator:
             _, _, _, y_test = ds.data()
             for det in self.detectors:
                 score = self.results[(ds.name, det.name)]
-                #y_pred = self.binarize(score, self.get_optimal_threshold(det, y_test, np.array(score)))
-                y_pred = self.binarize(score, self.threshold(np.array(score)))
+                y_pred = self.binarize(score, self.get_optimal_threshold(det, y_test, np.array(score)))
+                #y_pred = self.binarize(score, self.threshold(np.array(score)))
                 acc, prec, rec, f1_score, f01_score = self.get_accuracy_precision_recall_fscore(y_test, y_pred)
                 confusion_mat = confusion_matrix(y_test,y_pred,labels=[0,1])
                 self.plot_confusion_matrix(det,ds,confusion_mat)
@@ -268,7 +268,7 @@ class Evaluator:
         plt.close('all')
         df1 = df.hidden_and_prototype_sequences.apply(pd.Series).assign(**{'indicator':df.indicator})
         p = int(np.round((df1.loc[:,df1.columns!='indicator'].shape[0])**(1/2)))
-        tnse = TSNE(n_components = 2 , verbose = 0, perplexity = p , n_iter = 5000)
+        tnse = TSNE(n_components = 2 , verbose = 0, perplexity = 7 , n_iter = 5000)
         tnse_results = tnse.fit_transform(df1.loc[:,df1.columns!='indicator'])
         fig = plt.figure()
         plt.title('The latents & prototypes in 2D latent space (tSNE)')
