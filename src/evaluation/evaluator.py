@@ -143,7 +143,7 @@ class Evaluator:
         if precision == 0 and recall == 0:
             f01_score = 0
         else:
-            f01_score = fbeta_score(y_true, y_pred, average='binary', beta=0.05)
+            f01_score = fbeta_score(y_true, y_pred, average='binary', beta=0.1)
         return accuracy, precision, recall, f_score, f01_score
 
     def space_shuttle_data_loader(sequence_length, step):
@@ -166,10 +166,10 @@ class Evaluator:
                     det.fit(X_train.copy())
                     score = det.predict(X_test.copy())
                     self.results[(ds.name, det.name)] = score
-                    #self.proto_input_space_ind[(ds.name,det.name)] = det.proto_input_space_ind.detach().numpy()
-                    #self.plot_prototypes_in_input_space(det,ds)
-                    #self.plot_input_sequences_closer_to_prototypes_input_space(det,ds)
-                    #self.plot_latents_and_prototypes(det,ds,det.hidden_and_prototype_as_df)
+                    self.proto_input_space_ind[(ds.name,det.name)] = det.proto_input_space_ind.detach().numpy()
+                    self.plot_prototypes_in_input_space(det,ds)
+                    self.plot_input_sequences_closer_to_prototypes_input_space(det,ds)
+                    self.plot_latents_and_prototypes(det,ds,det.hidden_and_prototype_as_df)
                     try:
 
 

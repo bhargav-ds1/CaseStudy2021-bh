@@ -112,14 +112,14 @@ class LSTMED(Algorithm, PyTorchUtils):
             #if epoch > 10:
                 #scheduler.step()
             for ts_batch in train_loader:
-                output, enc_hidden = self.lstmed(self.to_var(ts_batch), return_latent =True)
-                #loss_c = self.loss_c(self.lstmed.prototype_layer.prototype,enc_hidden)
-                #loss_d = self.loss_d(self.lstmed.prototype_layer.prototype)
-                #loss_e =  self.loss_e(self.lstmed.prototype_layer.prototype,enc_hidden)
+                output, enc_hidden,a = self.lstmed(self.to_var(ts_batch), return_latent =True)
+                loss_c = self.loss_c(self.lstmed.prototype_layer.prototype,enc_hidden)
+                loss_d = self.loss_d(self.lstmed.prototype_layer.prototype)
+                loss_e =  self.loss_e(self.lstmed.prototype_layer.prototype,enc_hidden)
                 loss_mse = nn.MSELoss(size_average=False)(output, self.to_var(ts_batch.float()))
                 #loss_w = torch.sum(torch.abs(self.lstmed.hidden2output.weight))
                 loss = loss_mse \
-                       #+ loss_e + loss_d + loss_c
+                       + loss_e + loss_d + loss_c
                 #print('loss_mse:'+str(loss_mse)+'loss_c:'+str(loss_c)+'loss_d:'+str(loss_d)+'loss_e:'+str(loss_e))
                 loss_arr.append(loss)
                 #optimizer.zero_grad()
@@ -131,7 +131,7 @@ class LSTMED(Algorithm, PyTorchUtils):
         # Here we find the indices of the input sequences whose hidden space is closer to the prototypes.
         #a_min = torch.ones(self.lstmed.prototype_layer.k)
         # tensor to store the indices of the inputs whose hidden space representation is closer to the prototypes.
-        '''self.proto_input_space_ind = torch.full((len(sequences),self.lstmed.prototype_layer.k),-1.)
+        self.proto_input_space_ind = torch.full((len(sequences),self.lstmed.prototype_layer.k),-1.)
 
         for i in range(len(sequences)):
             output, enc_hidden,a = self.lstmed(self.to_var(
@@ -148,7 +148,7 @@ class LSTMED(Algorithm, PyTorchUtils):
             self.hidden_and_prototype_as_df.loc[len(self.hidden_and_prototype_as_df)]=[self.lstmed.prototype_layer.
                                                                             prototype[k].detach().numpy().tolist(),1]
         print(self.proto_input_space_ind)
-        print(self.hidden_and_prototype_as_df)'''
+        print(self.hidden_and_prototype_as_df)
 
         self.lstmed.eval()
         error_vectors = []
@@ -250,8 +250,8 @@ class LSTMEDModule(nn.Module, PyTorchUtils):
                                num_layers=self.n_layers[1], bias=self.use_bias[1], dropout=self.dropout[1])
         self.to_device(self.decoder)
         #-----------
-        #self.prototype_layer = prototype_layer(self.hidden_size, self.n_prototypes,seed, gpu )
-        #self.to_device(self.prototype_layer)
+        self.prototype_layer = prototype_layer(self.hidden_size, self.n_prototypes,seed, gpu )
+        self.to_device(self.prototype_layer)
         #-----------
         self.hidden2output = nn.Linear(self.hidden_size, self.n_features)
         self.to_device(self.hidden2output)
@@ -285,6 +285,6 @@ class LSTMEDModule(nn.Module, PyTorchUtils):
             else:
                 _, dec_hidden = self.decoder(output[:, i].unsqueeze(1), dec_hidden)
 
-        #a=self.prototype_layer(enc_hidden,batch_size)
+        a=self.prototype_layer(enc_hidden,batch_size)
 
-        return (output, enc_hidden[0][-1]) if return_latent else output
+        return (output, enc_hidden[0][-1],a) if return_latent else output

@@ -74,7 +74,7 @@ def evaluate_real_datasets():
             data_set_name = data_set_path.split('/')[-1].replace('.pkl', '')
             dataset = RealPickledDataset(data_set_name, data_set_path)
             datasets.append(dataset)
-    for i in range(2,1501,10):
+    for i in range(2,1000,10):
         for seed in seeds:
             evaluator = Evaluator(datasets, detectors, seed=seed, step=i, sequence_length=i,n_prototypes=2)
             evaluator.evaluate()
@@ -82,7 +82,7 @@ def evaluate_real_datasets():
 
             evaluator.plot_roc_curves()
             evaluator.plot_threshold_comparison()
-            #evaluator.plot_scores()
+            evaluator.plot_scores()
             results = results.append(result, ignore_index=True)
 
         avg_results = results.groupby(['dataset', 'algorithm'], as_index=False).mean()
